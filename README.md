@@ -11,13 +11,6 @@ The page is intentionally a visual index, not a parallel architecture document. 
 - `docs/guides/specialist-training.md`
 - `docs/guides/loop-and-heartbeat.md`
 
-## Local preview
+## Preview
 
-```powershell
-npm install
-npm run dev
-```
-
-## GitHub Pages
-
-The workflow in `.github/workflows/pages.yml` builds the static export and publishes it from `main`. In repository Settings → Pages, set the source to **GitHub Actions** once if it is not already selected.
+[Presentation](https://visak13.github.io/Harness-presentation/)
