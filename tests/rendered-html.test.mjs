@@ -14,18 +14,22 @@ async function render() {
   );
 }
 
-test("server-renders the animated harness overview", async () => {
+test("server-renders the autonomous harness overview", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>EDA Claude Harness — Animated Overview<\/title>/i);
-  assert.match(html, /One goal\./);
-  assert.match(html, /Many clean contexts\./);
+  assert.match(html, /<title>EDA Claude Harness — How Autonomous Work Keeps Moving<\/title>/i);
+  assert.match(html, /Stay in the conversation\./);
+  assert.match(html, /Let the system keep moving\./);
   assert.match(html, /NEURON/);
+  assert.match(html, /PLANNER/);
+  assert.match(html, /WORKER/);
   assert.match(html, /REVIEWER/);
-  assert.match(html, /RX \/ MONITOR/);
+  assert.match(html, /BROKER/);
+  assert.match(html, /POOL/);
+  assert.match(html, /FSM/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -40,6 +44,9 @@ test("keeps canonical references and reduced-motion support", async () => {
   assert.match(page, /docs\/guides\/architecture-vocabulary\.md/);
   assert.match(page, /docs\/guides\/planner-phase-author\.md/);
   assert.match(page, /docs\/guides\/loop-and-heartbeat\.md/);
+  assert.match(page, /src\/edp_claude\/tools\/roles\.py/);
+  assert.match(page, /FOREGROUND · DIRECTION LOOP/);
+  assert.match(page, /BACKGROUND · EXECUTION LOOP/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(layout, /Harness-presentation\/og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
