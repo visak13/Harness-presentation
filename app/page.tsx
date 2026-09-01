@@ -1,284 +1,99 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
-const DURATION = 7200;
+const SCENE_DURATION = 8000;
 
 const scenes = [
-  {
-    eyebrow: "01 / THE OUTER LOOP",
-    title: "One shell stays with you.",
-    copy: "The Neuron shell keeps refining direction with the user. It owns the recipe map, routes decisions, and remains available while delegated work runs elsewhere.",
-    focus: ["neuron", "recipe", "user-loop"],
-  },
-  {
-    eyebrow: "02 / AUTONOMY",
-    title: "The conversation continues. So does the work.",
-    copy: "Pool launches a Planner for a ready recipe step. The Planner launches fresh Worker and Reviewer shells. The outer Neuron does not become the execution bottleneck.",
-    focus: ["neuron", "pool", "planner", "worker", "reviewer", "spawn"],
-  },
-  {
-    eyebrow: "03 / FOCUSED ROLES",
-    title: "Every shell gets one job and fewer tools.",
-    copy: "Role-specific tool surfaces keep each context narrow: Neuron routes, Planner coordinates, Worker builds, and Reviewer re-proves. Expertise arrives as compiled guidance, not a shared chat history.",
-    focus: ["neuron", "planner", "worker", "reviewer", "tools", "specs"],
-  },
-  {
-    eyebrow: "04 / LIVE COORDINATION",
-    title: "Messages travel both ways.",
-    copy: "Broker carries addressed questions, answers, findings, and steering. Rx subscriptions feed blue Monitor lines inside each shell, waking the right role as soon as something changes.",
-    focus: ["neuron", "planner", "worker", "reviewer", "broker", "monitor", "messages"],
-  },
-  {
-    eyebrow: "05 / SHARED STATE",
-    title: "Context stays small. State stays connected.",
-    copy: "Recipe, step, plan, action, message, session, and lock are objects. Agents reach them through scoped CRUD tools; the FSM owns legal lifecycle transitions and reconciles reality before the next move.",
-    focus: ["fsm", "objects", "crud", "tools", "recipe", "plan"],
-  },
-  {
-    eyebrow: "06 / SEPARATION OF CONCERNS",
-    title: "Each layer solves one kind of problem.",
-    copy: "Vocabulary names the system. Guides teach judgment. Shapes help planning. Specs carry expertise. Tools bound action. Rx wakes. CRON backs it up. Roles stay focused on the task at hand.",
-    focus: ["concerns", "guides", "shapes", "specs", "rx", "cron", "tools", "vocab"],
-  },
-];
+  { slug: "goal", number: "01", label: "Bring a goal", title: "Your words start the work.", copy: "You say what you need. The Owner records it verbatim, opens the epic, and calls in the Architect.", caption: "Start with your words—not a workflow form." },
+  { slug: "design", number: "02", label: "Design together", title: "The plan talks back.", copy: "The Architect asks. You answer. Fresh specialists turn that conversation into strategy and craft.", caption: "Design with the human; bring experts in where needed." },
+  { slug: "sign", number: "03", label: "Sign once", title: "Two documents. One human gate.", copy: "Strategy and craft meet in your inbox. One approval sets the rules every builder and checker inherits.", caption: "One human gate sets the rules of the build." },
+  { slug: "build", number: "04", label: "Build from the record", title: "The board becomes motion.", copy: "The Engineer breaks stories into small tickets, builds from the approved rules, and advances the record.", caption: "Small contexts do focused work from shared truth." },
+  { slug: "check", number: "05", label: "Check with different eyes", title: "Proof changes hands.", copy: "Review enforces the design. Sol attacks once. Then you decide which findings deserve the build’s attention.", caption: "Review proves it. Adversarial challenge tries to break it." },
+  { slug: "accept", number: "06", label: "Accept cold", title: "The last judge forgets the journey.", copy: "QA starts cold and returns to your original words—not the team’s summary, confidence, or momentum.", caption: "The final judge returns to what you actually asked for." },
+  { slug: "survive", number: "07", label: "Nobody disappears", title: "The work remembers everyone.", copy: "Seats wake, close, and return. Humans cross timezones. Every handoff and close reason stays on the Board.", caption: "Work survives windows, restarts, people, and timezones." },
+] as const;
 
-const sources = [
-  ["System nouns, object graph, and three planes", "docs/guides/architecture-vocabulary.md"],
-  ["Neuron ownership and routing phases", "docs/guides/neuron-protocol-reference.md"],
-  ["Planner DAG, Shapes, and action authoring", "docs/guides/planner-phase-author.md"],
-  ["Worker/reviewer dispatch and flowback", "docs/guides/planner-phase-drive.md"],
-  ["Event plane and Monitor subscriptions", "docs/guides/reactive-streams.md"],
-  ["Monitor-first cadence and CRON backstop", "docs/guides/loop-and-heartbeat.md"],
-  ["FSM ownership boundary", "docs/design/FSM-RESPONSIBILITY.md"],
-  ["Per-role tool and CRUD scopes", "src/edp_claude/tools/roles.py"],
-];
+type SceneSlug = (typeof scenes)[number]["slug"];
+type Tone = "human" | "gold" | "green" | "blue" | "coral";
 
-type ShellProps = {
-  id: string;
-  role: string;
-  title: string;
-  lines: string[];
-  monitor: string;
-  tools: string;
-  compact?: boolean;
-  active: Set<string>;
+const cast = [
+  { id: "owner", mark: "O", name: "Owner", tone: "human" },
+  { id: "architect", mark: "A", name: "Architect", tone: "gold" },
+  { id: "sme", mark: "S", name: "SME", tone: "green" },
+  { id: "engineer", mark: "E", name: "Engineer", tone: "green" },
+  { id: "reviewer", mark: "R", name: "Reviewer", tone: "blue" },
+  { id: "sol", mark: "◈", name: "Sol", tone: "coral" },
+  { id: "qa", mark: "Q", name: "QA", tone: "blue" },
+] as const;
+
+const activeCast: Record<SceneSlug, string[]> = {
+  goal: ["owner", "architect"], design: ["architect", "sme"], sign: ["architect", "sme"], build: ["engineer"], check: ["reviewer", "sol"], accept: ["qa"], survive: cast.map((seat) => seat.id),
 };
 
-function ClaudeGlyph({ small = false }: { small?: boolean }) {
-  return <span className={small ? "claude-glyph claude-glyph--small" : "claude-glyph"} aria-hidden="true">✳</span>;
+const sources = [
+  ["Your inbox and the design gate", "/ui/me"], ["The verbatim goal and work rooms", "/ui/epic/<id>"], ["Ticket conversation and evidence", "/ui/ticket/<id>"], ["Wake, handoff, and close history", "/ui/activity"],
+] as const;
+
+function Actor({ mark, name, role, tone = "blue", live = true, compact = false }: { mark: string; name: string; role?: string; tone?: Tone; live?: boolean; compact?: boolean }) {
+  return <div className={`actor actor--${tone} ${live ? "is-live" : "is-resting"} ${compact ? "actor--compact" : ""}`}><span className="actor__face"><b>{mark}</b><i /></span><span className="actor__text"><strong>{name}</strong>{role && <small>{role}</small>}</span></div>;
 }
 
-function ClaudeShell({ id, role, title, lines, monitor, tools, compact = false, active }: ShellProps) {
-  const hot = active.has(id) || active.has("all");
-  return (
-    <article className={`cc-shell cc-shell--${id} ${compact ? "cc-shell--compact" : ""} ${hot ? "is-active" : ""}`} data-kind="shell">
-      <header className="cc-shell__bar">
-        <span><ClaudeGlyph small /> Claude Code</span>
-        <i /><i /><i />
-      </header>
-      <div className="cc-shell__role"><span>ROLE</span><strong>{role}</strong><small>{title}</small></div>
-      <div className="cc-shell__terminal">
-        {lines.map((line, index) => <p key={line}><b className={index === lines.length - 1 ? "term-dot term-dot--green" : "term-dot"} />{line}</p>)}
-      </div>
-      <div className="cc-shell__input"><span>›</span><i /></div>
-      <div className="cc-shell__monitor"><b>MONITOR</b><span>{monitor}</span></div>
-      <footer><b>TOOL SURFACE</b><span>{tools}</span></footer>
-    </article>
-  );
+function Packet({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
+  return <span className={`packet ${className}`} style={{ "--delay": `${delay}s` } as CSSProperties}><i />{children}</span>;
 }
 
-function Service({ id, label, kind, detail, active }: { id: string; label: string; kind: string; detail: string; active: Set<string> }) {
-  return (
-    <div className={`service service--${id} ${active.has(id) || active.has("all") ? "is-active" : ""}`} data-kind="service">
-      <span>{kind}</span><strong>{label}</strong><small>{detail}</small>
-    </div>
-  );
+function BoardChrome({ children, label, className = "" }: { children: React.ReactNode; label: string; className?: string }) {
+  return <section className={`board-window ${className}`}><header className="board-window__bar"><div><i /><i /><i /></div><b>BOARD / {label}</b><span>RECORDED</span></header>{children}</section>;
 }
 
-function Legend() {
-  return (
-    <div className="legend" aria-label="Visual legend">
-      <span><i className="legend__shell" />Claude Code shell</span>
-      <span><i className="legend__service" />Infrastructure service</span>
-      <span><i className="legend__object" />State object</span>
-      <span><i className="legend__guide" />Guidance layer</span>
-    </div>
-  );
+function MiniBoard() {
+  return <BoardChrome label="EPIC / SUPPORT RELIABILITY" className="mini-board"><div className="mini-board__body"><aside><b>edp8</b><span className="is-on">My work <i>3</i></span><span>Epics</span><span>Activity</span><small>POOL / 3 BUSY</small></aside><div className="mini-board__main"><div className="mini-board__head"><div><small>EPIC 024</small><strong>Support that never loses the thread</strong></div><em>IN PROGRESS</em></div><div className="kanban"><div><header>TO DO <b>2</b></header><article><small>STORY 04</small><strong>Keep every customer handoff</strong><span>Owner · ready</span></article></div><div><header>IN FLIGHT <b>2</b></header><article className="ticket-hot"><small>TASK 11</small><strong>Reconnect from shared history</strong><span>Engineer · building</span><i /></article></div><div><header>PROOF <b>1</b></header><article><small>REVIEW 07</small><strong>Verify missed-message recovery</strong><span>Reviewer · queued</span></article></div></div></div></div></BoardChrome>;
+}
+
+function GoalScene() {
+  return <div className="scene scene--goal"><div className="goal-human"><Actor mark="H" name="You" role="project lead" tone="human" /><blockquote>“Help our support team stop losing the thread when a shift changes.”</blockquote></div><div className="goal-board"><BoardChrome label="NEW EPIC"><div className="epic-record"><small>YOUR GOAL / VERBATIM</small><h3>Support that never loses the thread</h3><p>Help our support team stop losing the thread when a shift changes.</p><footer><span>EPIC 024</span><b>OPEN</b></footer></div></BoardChrome></div><div className="goal-actors"><Actor mark="O" name="Owner" role="opens work" tone="human" /><Actor mark="A" name="Architect" role="seat waking" tone="gold" /></div><div className="path path--goal-in" /><div className="path path--goal-out" /><Packet className="packet--goal">verbatim goal</Packet><Packet className="packet--wake" delay={2.6}>@architect <b>WAKE</b></Packet><div className="scene-callout callout--goal"><i />Your sentence becomes the anchor.</div></div>;
+}
+
+function DesignScene() {
+  return <div className="scene scene--design"><div className="design-room"><div className="design-person"><Actor mark="H" name="You" tone="human" compact /><p>“A handoff can wait overnight. It can’t vanish.”</p></div><div className="design-person design-person--right"><p>“Then durability is a rule, not a feature.”</p><Actor mark="A" name="Architect" tone="gold" compact /></div><div className="dialogue-cursor"><span /><span /><span /></div></div><div className="design-board"><BoardChrome label="DESIGN ROOM"><div className="design-notes"><span>OUTCOME</span><b>Durable handoffs</b><span>BOUNDARY</span><b>Human-owned priority</b><span>RISK</span><b>Silent loss</b></div></BoardChrome></div><div className="sme-work sme-work--strategy"><Actor mark="S1" name="SME" role="strategy" tone="green" compact /><article><small>HIGH LEVEL</small><h3>Strategy</h3><p>Outcomes, boundaries, risks</p><i>6 findings</i></article></div><div className="sme-work sme-work--craft"><Actor mark="S2" name="SME" role="craft" tone="green" compact /><article><small>LOW LEVEL</small><h3>Craft</h3><p>Rules, interfaces, proof</p><i>12 rules</i></article></div><div className="path path--design-a" /><div className="path path--design-b" /><Packet className="packet--question">human constraint</Packet><Packet className="packet--research" delay={2.2}>research brief</Packet><div className="scene-callout callout--design"><i />Conversation becomes usable judgment.</div></div>;
+}
+
+function SignScene({ approved, onApprove }: { approved: boolean; onApprove: () => void }) {
+  return <div className={`scene scene--sign ${approved ? "is-approved" : ""}`}><article className="flying-doc flying-doc--strategy"><small>HIGH LEVEL</small><b>Strategy</b><span>6 findings</span></article><article className="flying-doc flying-doc--craft"><small>LOW LEVEL</small><b>Craft</b><span>12 rules</span></article><div className="sign-board"><BoardChrome label="MY INBOX"><div className="inbox-nav"><b>My work</b><span>Decisions <i>1</i></span><span>Questions</span></div><article className="gate-card"><header><span>✶</span><div><small>DESIGN SIGN-OFF</small><b>Rules for reliable handoffs</b></div><em>{approved ? "APPROVED" : "YOUR DECISION"}</em></header><div className="gate-card__docs"><p><i />Strategy <b>Outcome + boundaries</b></p><p><i />Craft <b>Rules + proof</b></p></div><blockquote>“A handoff may wait. It may never vanish.”</blockquote><footer><button type="button">Needs work</button><button type="button" onClick={onApprove}>{approved ? "Approved ✓" : "Approve strategy"}</button></footer><div className="auto-approval">APPROVED <span>✓</span></div></article></BoardChrome></div><div className="authority-bracket"><span>ONE HUMAN GATE</span></div><Packet className="packet--doc-a">strategy</Packet><Packet className="packet--doc-b" delay={0.4}>craft</Packet><div className="rules-release"><span>CONSTRUCTIVE</span><span>ENFORCED</span><i /></div><div className="scene-callout callout--sign"><i />One yes releases both views.</div></div>;
+}
+
+function BuildScene() {
+  const cols = [["READY", "13", "Recover after restart", "ready"], ["BUILDING", "12", "Wake the next owner", "building"], ["PROOF", "11", "Capture every handoff", "4/4 checks"]];
+  return <div className="scene scene--build"><div className="build-engineer"><Actor mark="E" name="Engineer" role="focused context" tone="green" /><div className="ruleset"><small>CONSTRUCTIVE VIEW</small><b>Build these truths</b><span>✓ persist message</span><span>✓ address owner</span><span>✓ prove recovery</span></div></div><div className="build-board"><BoardChrome label="EPIC 024 / TICKETS"><div className="board-title"><div><small>APPROVED EPIC</small><b>Reliable support handoffs</b></div><span>3 TASKS</span></div><div className="build-columns">{cols.map(([label, id, title, status]) => <div key={label}><header>{label}<b>1</b></header><span className={`board-ticket board-ticket--${id}`}><small>T-{id}</small><strong>{title}</strong><em>{status}</em></span></div>)}</div><span className="moving-ticket"><small>T-12</small><b>Wake the next owner</b><i>BUILD → PROOF</i></span></BoardChrome></div><div className="story-split"><small>STORY 04</small>{[["T-11", "Capture handoff"], ["T-12", "Wake owner"], ["T-13", "Recover"]].map(([id, label]) => <span key={id}><b>{id}</b>{label}</span>)}</div><div className="path path--build" /><Packet className="packet--evidence">evidence + decision</Packet><div className="scene-callout callout--build"><i />Tickets move. Context stays small.</div></div>;
+}
+
+function CheckScene({ picked, onPick }: { picked: string; onPick: (finding: string) => void }) {
+  const relay = [["E", "Engineer", "built"], ["R", "Reviewer", "proved"], ["◈", "Sol", "attacked"], ["H", "You", "chose"]] as const;
+  return <div className="scene scene--check"><div className="relay-line" /><div className="relay-cast">{relay.map(([mark, name, verb], index) => <div className={`relay-node relay-node--${index}`} key={name}><Actor mark={mark} name={name} tone={index === 0 ? "green" : index === 1 ? "blue" : index === 2 ? "coral" : "human"} compact /><span>{verb}</span>{index < relay.length - 1 && <b>→</b>}</div>)}</div><Packet className="packet--relay-one">BUILD + EVIDENCE</Packet><Packet className="packet--relay-two" delay={2.2}>ENFORCED VERDICT</Packet><Packet className="packet--relay-three" delay={4.1}>2 FINDINGS</Packet><div className="review-proof"><small>REVIEWER / ENFORCED VIEW</small><strong>12 / 12 obligations proven</strong><span>Independent re-run <b>PASS</b></span></div><div className="sol-strike"><header><span>◈</span><div><small>ONE BOUNDED ROUND</small><b>Sol / hostile check</b></div><em>1 / 1</em></header><p>“What if the next owner is offline?”</p><p>“What if two people answer at once?”</p></div><div className="human-pick"><small>HUMAN RULING</small><b>Which finding changes the work?</b><button className={picked === "offline" ? "is-picked" : ""} onClick={() => onPick("offline")}><i />Offline recovery <span>{picked === "offline" ? "KEPT" : "Keep"}</span></button><button className={picked === "race" ? "is-picked" : ""} onClick={() => onPick("race")}><i />Double-answer race <span>{picked === "race" ? "KEPT" : "Keep"}</span></button></div><div className="scene-callout callout--check"><i />Different eyes. Human consequence.</div></div>;
+}
+
+function AcceptScene() {
+  return <div className="scene scene--accept"><div className="accept-source"><small>EPIC 024 / YOUR WORDS / DAY 1</small><blockquote>“Help our support team stop losing the thread when a shift changes.”</blockquote><footer><span>VERBATIM</span><i>UNCHANGED</i></footer></div><div className="cold-start"><span>COLD START</span><i /></div><div className="qa-seat"><Actor mark="Q" name="QA" role="no build history" tone="blue" /></div><BoardChrome label="ACCEPTANCE / FRESH RUN" className="accept-board"><div className="accept-head"><span>ACCEPTANCE RUN 019</span><b>Checking the original ask</b></div><div className="accept-checks"><p><i />Handoff is durable <b>PASS</b></p><p><i />Offline owner is recoverable <b>PASS</b></p><p><i />Shift change keeps full context <b>PASS</b></p></div><div className="accept-verdict"><span>7 / 7</span><div><small>COLD ACCEPTANCE</small><b>What you asked for now works.</b></div><em>ACCEPTED</em></div></BoardChrome><Packet className="packet--cold">original epic</Packet><div className="scene-callout callout--accept"><i />No inherited confidence. Just proof.</div></div>;
+}
+
+function SurviveScene() {
+  return <div className="scene scene--survive"><div className="survive-board"><BoardChrome label="LIVE ACTIVITY"><div className="activity-feed"><header><div><small>EPIC 024</small><b>Everyone can find the thread</b></div><span>LIVE</span></header><p className="feed-item feed-item--1"><i className="feed-wake" /><b>Broker woke @reviewer</b><span>Addressed finding ready</span><time>09:42</time></p><p className="feed-item feed-item--2"><i className="feed-close" /><b>Engineer closed</b><span>Reason: build complete; evidence attached</span><time>09:48</time></p><p className="feed-item feed-item--3"><i className="feed-human" /><b>@maya answered from Toronto</b><span>Keep offline recovery</span><time>23:21</time></p><p className="feed-item feed-item--4"><i className="feed-open" /><b>QA re-grounded from Board</b><span>Fresh context; original epic loaded</span><time>09:53</time></p></div></BoardChrome></div><div className="pool-card"><header><small>POOL / SEATS</small><span>7 known</span></header><p><i className="busy" />Reviewer <b>BUSY</b></p><p><i className="idle" />Owner <b>IDLE</b></p><p><i className="closed" />Engineer <b>CLOSED</b></p></div><div className="broker-card"><small>BROKER</small><b>@reviewer</b><span>addressed wake</span><i /></div><div className="timezone timezone--blr"><Actor mark="AK" name="Akhil" role="Bengaluru / 09:42" tone="human" compact /><span>browser seat</span></div><div className="timezone timezone--tor"><Actor mark="MY" name="Maya" role="Toronto / 23:12" tone="human" compact /><span>browser seat</span></div><div className="path path--wake" /><Packet className="packet--survive-wake">@reviewer WAKE</Packet><div className="scene-callout callout--survive"><i />The Board outlives every seat.</div></div>;
+}
+
+function SceneStage({ scene, approved, onApprove, picked, onPick }: { scene: SceneSlug; approved: boolean; onApprove: () => void; picked: string; onPick: (finding: string) => void }) {
+  if (scene === "goal") return <GoalScene />; if (scene === "design") return <DesignScene />; if (scene === "sign") return <SignScene approved={approved} onApprove={onApprove} />; if (scene === "build") return <BuildScene />; if (scene === "check") return <CheckScene picked={picked} onPick={onPick} />; if (scene === "accept") return <AcceptScene />; return <SurviveScene />;
+}
+
+function CastRail({ scene }: { scene: SceneSlug }) {
+  const active = activeCast[scene];
+  return <div className={`cast-rail cast-rail--${scene}`} aria-label="Team seats active in this act"><span className="cast-rail__label">LIVE SEATS</span>{cast.map((seat) => <Actor key={seat.id} mark={seat.mark} name={seat.name} role={active.includes(seat.id) ? "working" : scene === "survive" ? "known" : "at rest"} tone={seat.tone as Tone} live={active.includes(seat.id)} compact />)}</div>;
 }
 
 export default function Home() {
-  const [scene, setScene] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const active = new Set(scenes[scene].focus);
-
-  useEffect(() => {
-    if (!playing) return;
-    const timer = window.setTimeout(() => setScene((value) => (value + 1) % scenes.length), DURATION);
-    return () => window.clearTimeout(timer);
-  }, [scene, playing]);
-
-  const choose = (index: number, pause = true) => {
-    setScene(index);
-    if (pause) setPlaying(false);
-  };
-
-  const onStageKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === "ArrowRight") choose((scene + 1) % scenes.length);
-    if (event.key === "ArrowLeft") choose((scene - 1 + scenes.length) % scenes.length);
-  };
-
-  return (
-    <main className="site-shell">
-      <nav className="topbar" aria-label="Primary navigation">
-        <a className="brand" href="#top"><ClaudeGlyph small /><span>EDA / CLAUDE HARNESS</span></a>
-        <div className="topbar__meta"><span>A 60 SECOND SYSTEM TOUR</span><button onClick={() => setSourcesOpen(true)}>Source map ↗</button></div>
-      </nav>
-
-      <section className="hero" id="top">
-        <div className="hero__copy">
-          <p className="kicker">AUTONOMY THROUGH SEPARATION OF CONCERNS</p>
-          <h1>Stay in the conversation.<br /><em>Let the system keep moving.</em></h1>
-          <p className="lede">The Claude harness turns one user-facing shell into a coordinated system of focused shells, shared state, and live two-way communication.</p>
-          <button className="watch" onClick={() => { setScene(0); setPlaying(true); document.querySelector(".story")?.scrollIntoView({ behavior: "smooth" }); }}><span>▶</span>Watch how autonomy emerges</button>
-        </div>
-
-        <div className="hero-shell-wrap">
-          <div className="hero-shell-label"><span>SHELL</span>A Claude Code process with its own context</div>
-          <article className="hero-shell" aria-label="Illustration of a Claude Code Neuron shell">
-            <header><span><ClaudeGlyph small /> Claude Code</span><i /><i /><i /></header>
-            <div className="hero-shell__terminal">
-              <p><b />/neuron Ship a reliable release</p>
-              <p><b className="green" />Refining outcomes with you.</p>
-              <p className="muted">Planner is driving step 02 in the background.</p>
-              <p><b className="green" />Worker finding received through Broker.</p>
-            </div>
-            <div className="hero-shell__composer"><span>›</span><em>Keep iterating on the design...</em></div>
-            <div className="hero-shell__monitor"><strong>MONITOR</strong><span>2 subscriptions · 3 shells active · listening</span></div>
-          </article>
-          <div className="hero-role-label"><span>ROLE</span>Neuron · router and recipe owner</div>
-        </div>
-      </section>
-
-      <section className="definition-strip" aria-label="Core distinctions">
-        <div><span>01</span><strong>SHELL</strong><p>A separate Claude Code process and context.</p></div>
-        <div><span>02</span><strong>ROLE</strong><p>The focused responsibility inside that shell.</p></div>
-        <div><span>03</span><strong>SERVICE</strong><p>Infrastructure for spawn, messages, and state.</p></div>
-        <div><span>04</span><strong>OBJECT</strong><p>Durable shared truth that survives any shell.</p></div>
-      </section>
-
-      <section className="story" aria-label="Animated harness walkthrough" tabIndex={0} onKeyDown={onStageKeyDown}>
-        <div className="story__header">
-          <div><p className="eyebrow">{scenes[scene].eyebrow}</p><h2 key={`title-${scene}`}>{scenes[scene].title}</h2></div>
-          <p key={`copy-${scene}`} className="story__copy">{scenes[scene].copy}</p>
-        </div>
-        <Legend />
-
-        <div className={`system-stage system-stage--${scene}`} key={`stage-${scene}`}>
-          <div className={`lane lane--foreground ${active.has("user-loop") ? "is-active" : ""}`}><span>FOREGROUND · DIRECTION LOOP</span><small>the shell that stays with the user</small></div>
-          <div className="lane lane--background"><span>BACKGROUND · EXECUTION LOOP</span><small>fresh contexts continue autonomously</small></div>
-
-          <ClaudeShell
-            id="neuron" role="NEURON" title="outer shell"
-            lines={["Refining the recipe with user", "Outcome 03 updated", "Background finding received"]}
-            monitor="broker inbox · recipe events · pool"
-            tools="recipe CRUD · consult · spawn planner"
-            active={active}
-          />
-
-          <div className="service-rack">
-            <p>INFRASTRUCTURE</p>
-            <Service id="pool" kind="SPAWN SERVICE" label="POOL" detail="sessions + locks" active={active} />
-            <Service id="broker" kind="MESSAGE SERVER" label="BROKER" detail="addressed two-way comms" active={active} />
-            <Service id="fsm" kind="STATE ENGINE" label="FSM" detail="legal lifecycle transitions" active={active} />
-          </div>
-
-          <ClaudeShell
-            id="planner" role="PLANNER" title="one recipe step"
-            lines={["DAG has 3 ready actions", "Worker question answered", "Review leg queued"]}
-            monitor="worklog · broker · pool · flowback"
-            tools="plan/action CRUD · spawn worker"
-            compact active={active}
-          />
-          <ClaudeShell
-            id="worker" role="WORKER" title="one action"
-            lines={["Loaded compiled guidance", "Implementing bounded action"]}
-            monitor="answers · steer"
-            tools="read context · work · record status"
-            compact active={active}
-          />
-          <ClaudeShell
-            id="reviewer" role="REVIEWER" title="independent proof"
-            lines={["Fresh context loaded", "Re-running acceptance"]}
-            monitor="answers · steer"
-            tools="read evidence · verify · verdict"
-            compact active={active}
-          />
-
-          <div className={`tool-gate ${active.has("tools") || active.has("crud") ? "is-active" : ""}`}><span>SCOPED TOOL LAYER</span><small>minimum verbs per role</small></div>
-
-          <div className={`object-store ${active.has("objects") || active.has("recipe") || active.has("plan") ? "is-active" : ""}`} data-kind="object">
-            <p>OBJECT GRAPH · SHARED STATE</p>
-            <div>{["recipe", "step", "plan", "action", "message", "session", "lock"].map((item) => <span key={item}>{item}</span>)}</div>
-            <small>CRUD: what is true now?</small>
-          </div>
-
-          <div className={`packet packet--question ${active.has("messages") ? "is-active" : ""}`}>question →</div>
-          <div className={`packet packet--finding ${active.has("messages") ? "is-active" : ""}`}>← finding</div>
-          <div className={`spawn-line ${active.has("spawn") ? "is-active" : ""}`}><span>POOL SPAWNS FRESH SHELLS</span></div>
-          <div className={`crud-line ${active.has("crud") ? "is-active" : ""}`}><span>READ · UPDATE · RECONCILE</span></div>
-
-          <div className={`concern-shelf ${active.has("concerns") ? "is-active" : ""}`} data-kind="guide">
-            <p>SEPARATE CONCERNS · COMPOSED AT THE MOMENT OF NEED</p>
-            <div>
-              <span className={active.has("vocab") ? "is-hot" : ""}><b>VOCABULARY</b>same nouns</span>
-              <span className={active.has("guides") ? "is-hot" : ""}><b>GUIDES</b>role judgment</span>
-              <span className={active.has("shapes") ? "is-hot" : ""}><b>SHAPES</b>planning patterns</span>
-              <span className={active.has("specs") ? "is-hot" : ""}><b>SPECS</b>expert craft</span>
-              <span className={active.has("rx") || active.has("monitor") ? "is-hot" : ""}><b>RX / MONITOR</b>wake now</span>
-              <span className={active.has("cron") ? "is-hot" : ""}><b>CRON</b>wake later</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="controls">
-          <button className="play-toggle" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause animation" : "Play animation"}>{playing ? "Ⅱ" : "▶"}</button>
-          <div className="chapters" role="tablist" aria-label="Animation chapters">
-            {scenes.map((item, index) => (
-              <button key={item.eyebrow} className={index === scene ? "is-current" : index < scene ? "is-past" : ""} onClick={() => choose(index)} aria-label={`Chapter ${index + 1}: ${item.title}`} aria-selected={index === scene} role="tab">
-                <span>{String(index + 1).padStart(2, "0")}</span><i>{index === scene && playing && <b style={{ animationDuration: `${DURATION}ms` }} />}</i>
-              </button>
-            ))}
-          </div>
-          <button className="next" onClick={() => choose((scene + 1) % scenes.length)}>Next →</button>
-        </div>
-      </section>
-
-      <section className="summary">
-        <p className="kicker">WHY THIS CAN RUN AUTONOMOUSLY</p>
-        <h2>The outer shell holds direction. Background shells hold tasks. Services hold coordination. Objects hold truth.</h2>
-        <div className="summary__equation"><span>USER ↔ NEURON</span><i>while</i><span>PLANNER → WORKER → REVIEWER</span><i>over</i><span>BROKER + POOL + FSM</span></div>
-      </section>
-
-      <footer>
-        <div><ClaudeGlyph small /><strong>EDA / Claude Harness</strong></div>
-        <p>A visual index of the architecture—not a replacement specification.</p>
-        <button onClick={() => setSourcesOpen(true)}>Open canonical references ↗</button>
-      </footer>
-
-      {sourcesOpen && (
-        <div className="drawer-wrap" role="dialog" aria-modal="true" aria-labelledby="source-title" onMouseDown={() => setSourcesOpen(false)}>
-          <aside className="drawer" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="drawer__close" onClick={() => setSourcesOpen(false)} aria-label="Close source map">×</button>
-            <p className="eyebrow">MAINTENANCE CONTRACT</p>
-            <h2 id="source-title">Read the source, not a second summary.</h2>
-            <p>Paths resolve from the <code>claude/</code> harness root. Check these reference points whenever the base project changes.</p>
-            <ol>{sources.map(([label, path]) => <li key={path}><span>{label}</span><code>{path}</code></li>)}</ol>
-            <p className="drawer__note">The animation stays intentionally conceptual. Protocol details and edge cases belong in the canonical guides and implementation.</p>
-          </aside>
-        </div>
-      )}
-    </main>
-  );
+  const [sceneIndex, setSceneIndex] = useState(0); const [playing, setPlaying] = useState(true); const [sourcesOpen, setSourcesOpen] = useState(false); const [approved, setApproved] = useState(false); const [picked, setPicked] = useState("offline"); const scene = scenes[sceneIndex];
+  useEffect(() => { if (!playing) return; const timer = window.setTimeout(() => setSceneIndex((index) => (index + 1) % scenes.length), SCENE_DURATION); return () => window.clearTimeout(timer); }, [sceneIndex, playing]);
+  useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === "ArrowRight") { setSceneIndex((index) => (index + 1) % scenes.length); setPlaying(false); } if (event.key === "ArrowLeft") { setSceneIndex((index) => (index - 1 + scenes.length) % scenes.length); setPlaying(false); } if (event.key === " " && !sourcesOpen) { event.preventDefault(); setPlaying((value) => !value); } if (event.key === "Escape") setSourcesOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [sourcesOpen]);
+  const choose = (index: number) => { setSceneIndex(index); setPlaying(false); };
+  return <main className="site-shell"><nav className="topbar" aria-label="Primary navigation"><a className="brand" href="#top"><span>✶</span>EDA / HARNESS</a><div><span>60 SECOND STORY</span><button onClick={() => setSourcesOpen(true)}>Source map ↗</button></div></nav><section className="hero" id="top"><div className="hero__copy"><p className="kicker">THE BOARD IS THE SHARED PLACE</p><h1>One board.<br /><em>A real team.</em><br />Humans included.</h1><p>Bring a goal. Watch the right specialists appear, work from shared truth, and leave proof the whole team can see.</p><button className="watch" onClick={() => { setSceneIndex(0); setPlaying(true); document.querySelector(".story")?.scrollIntoView({ behavior: "smooth" }); }}><span>▶</span> Watch the team work</button><small>Autoplays in 56 seconds · arrows to explore</small></div><div className="hero__stage"><div className="hero-orbit hero-orbit--one"><Actor mark="H" name="Human" tone="human" compact /></div><div className="hero-orbit hero-orbit--two"><Actor mark="A" name="Architect" tone="gold" compact /></div><div className="hero-orbit hero-orbit--three"><Actor mark="E" name="Engineer" tone="green" compact /></div><div className="hero-orbit hero-orbit--four"><Actor mark="R" name="Reviewer" tone="blue" compact /></div><MiniBoard /><div className="hero-path hero-path--one" /><div className="hero-path hero-path--two" /><Packet className="hero-packet hero-packet--one">@architect</Packet><Packet className="hero-packet hero-packet--two" delay={1.7}>proof ready</Packet></div></section><section className="plain-words"><p><span>BOARD</span><b>what everyone knows</b></p><p><span>SEAT</span><b>one role, one judgment</b></p><p><span>SHELL</span><b>a fresh working window</b></p><p><span>SERVICE</span><b>keeps seats visible and awake</b></p></section><section className="story" aria-label="Seven-act product story"><div className="story__heading"><div><p>{scene.number} / {scene.label.toUpperCase()}</p><h2 key={`title-${scene.slug}`}>{scene.title}</h2></div><div className="story__narration"><p key={`copy-${scene.slug}`}>{scene.copy}</p><b>{scene.caption}</b></div></div><div className="stage" key={scene.slug}><div className="stage-grid" /><SceneStage scene={scene.slug} approved={approved} onApprove={() => setApproved(true)} picked={picked} onPick={setPicked} /><CastRail scene={scene.slug} /></div><div className="story-controls"><button className="play" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause autoplay" : "Resume autoplay"}>{playing ? "Ⅱ" : "▶"}</button><div className="chapter-rail" role="tablist" aria-label="Story acts">{scenes.map((item, index) => <button key={item.slug} className={index === sceneIndex ? "is-current" : index < sceneIndex ? "is-past" : ""} role="tab" aria-selected={index === sceneIndex} onClick={() => choose(index)}><span>{item.number}</span><i>{index === sceneIndex && playing && <b style={{ animationDuration: `${SCENE_DURATION}ms` }} />}</i><em>{item.label}</em></button>)}</div><button className="next" onClick={() => choose((sceneIndex + 1) % scenes.length)}>Next →</button></div></section><section className="outro"><p className="kicker">WHAT HOLDS IT TOGETHER</p><h2>Focused contexts change.<br /><em>Shared truth remains.</em></h2><div className="outro__services"><article><span>POOL</span><b>Who is here?</b><p>Starts seats and shows busy, idle, or closed.</p></article><article><span>BROKER</span><b>Who needs this?</b><p>Delivers addressed messages and wakes the right role.</p></article><article><span>BOARD</span><b>What is true?</b><p>Keeps your goal, rulings, work, proof, and close reasons.</p></article></div></section><footer className="site-footer"><div><span>✶</span><b>EDA / Harness</b></div><p>One board. A real team. Humans included.</p><button onClick={() => setSourcesOpen(true)}>Open product surfaces ↗</button></footer>{sourcesOpen && <div className="drawer-wrap" role="presentation" onMouseDown={() => setSourcesOpen(false)}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="source-title" onMouseDown={(event) => event.stopPropagation()}><button className="drawer__close" onClick={() => setSourcesOpen(false)} aria-label="Close source map">×</button><p className="kicker">SOURCE MAP</p><h2 id="source-title">The Board is the reference.</h2><p>These product surfaces carry the durable record behind the story.</p><ol>{sources.map(([label, path]) => <li key={path}><span>{label}</span><code>{path}</code></li>)}</ol><p className="drawer__note">Scenes simplify the handoff. The Board keeps the exact history.</p></aside></div>}</main>;
 }
